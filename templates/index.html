@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LEGO Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4"></script>
+</head>
+<body>
+    <h1>LEGO Scanner (Phone Camera + Tesseract.js)</h1>
+
+    <video id="video" width="320" height="240" autoplay></video>
+    <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+    <br>
+    <button onclick="exportData()">Export to Excel</button>
+    <pre id="log"></pre>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const log = document.getElementById('log');
+        const context = canvas.getContext('2d');
+        const scannedIDs = new Set();
+
+        async function startCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+        }
+
+        async function scanFrame() {
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
+
+            const match = text.match(/\b\d{3,7}\b/);  // LEGO ID (numbers only)
+            if (match) {
+                const legoID = match[0];
+                if (!scannedIDs.has(legoID)) {
+                    scannedIDs.add(legoID);
+                    log.innerText += `🧱 Scanned: ${legoID}\n`;
+
+                    const response = await fetch('/submit_code', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lego_id: legoID })
+                    });
+
+                    const data = await response.json();
+                    if (response.ok) {
+                        log.innerText += `✅ ${data.name} | Avg Price: $${data.avg_price}\n\n`;
+                    } else {
+                        log.innerText += `❌ ${data.error || 'Failed to fetch'}\n\n`;
+                    }
+                }
+            }
+
+            setTimeout(scanFrame, 2000); // Scan every 2 seconds
+        }
+
+        function exportData() {
+            window.location.href = '/export';
+        }
+
+        startCamera().then(scanFrame);
+    </script>
+</body>
+</html>
