@@ -1,156 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LEGO Scanner</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: 'Segoe UI', sans-serif;
-      background-color: #fff;
-      color: #222;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 2rem;
-    }
-
-    header {
-      background-color: #f7d117; /* LEGO yellow */
-      color: #c00; /* LEGO red */
-      padding: 1rem 2rem;
-      font-size: 1.8rem;
-      font-weight: bold;
-      text-align: center;
-      border-radius: 8px;
-      margin-bottom: 1.5rem;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    }
-
-    video {
-      width: 100%;
-      max-width: 480px;
-      border: 4px solid #c00;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-    }
-
-    .output {
-      font-size: 1.2rem;
-      margin-top: 1rem;
-      background: #f7f7f7;
-      padding: 1rem;
-      border-radius: 8px;
-      max-width: 480px;
-      width: 100%;
-      text-align: left;
-      border: 1px solid #ddd;
-      white-space: pre-wrap;
-    }
-
-    button {
-      background-color: #c00;
-      color: white;
-      border: none;
-      padding: 0.75rem 1.5rem;
-      border-radius: 6px;
-      font-size: 1rem;
-      cursor: pointer;
-      margin-top: 1rem;
-    }
-
-    button:hover {
-      background-color: #a00;
-    }
-
-    @media (max-width: 600px) {
-      header {
-        font-size: 1.4rem;
-        padding: 1rem;
-      }
-    }
-  </style>
+    <title>LEGO Scanner</title>
 </head>
 <body>
-  <header>LEGO Scanner</header>
+    <h1>LEGO Set Scanner</h1>
+    <img src="{{ url_for('video_feed') }}" width="640" height="480">
+    <br>
+    <button onclick="scan()">Scan & Fetch Price</button>
+    <pre id="result"></pre>
 
-  <video id="camera" autoplay playsinline></video>
-
-  <div class="output" id="result">Recognized LEGO Code: <strong>None</strong></div>
-  <div class="output" id="debug">Debug Log: Waiting for input...</div>
-
-  <button onclick="exportData()">Export to Excel</button>
-
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
-  <script>
-    const seenCodes = new Set();
-    const output = document.getElementById("result");
-    const debug = document.getElementById("debug");
-    const video = document.getElementById("camera");
-    let scanning = true;
-    let interval;
-
-    // Start camera
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then(stream => {
-        video.srcObject = stream;
-        interval = setInterval(scanFrame, 2500);
-      })
-      .catch(err => {
-        debug.textContent = "Camera error: " + err;
-      });
-
-    function scanFrame() {
-      if (!scanning) return;
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0);
-
-      Tesseract.recognize(canvas, 'eng', {
-        tessedit_char_whitelist: '0123456789'
-      })
-      .then(result => {
-        const text = result.data.text.trim().match(/\d{4,}/g); // Only 4+ digit numbers
-        if (text) {
-          text.forEach(code => {
-            if (!seenCodes.has(code)) {
-              seenCodes.add(code);
-              output.innerHTML = `Recognized LEGO Code: <strong>${code}</strong>`;
-              debug.innerText = "Detected new code: " + code;
-              fetch('/price', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: code })
-              })
-              .then(res => res.json())
-              .then(data => {
-                debug.innerText += `\nLego Set: ${data.name}\nAvg Price: ${data.price}`;
-              })
-              .catch(err => {
-                debug.innerText += "\nAPI error: " + err;
-              });
-            }
-          });
+    <script>
+        function scan() {
+            fetch('/scan')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('result').innerText = JSON.stringify(data, null, 2);
+                });
         }
-      })
-      .catch(err => {
-        debug.innerText = "OCR error: " + err;
-      });
-    }
-
-    function exportData() {
-      fetch("/export", { method: "POST" })
-        .then(res => res.blob())
-        .then(blob => {
-          const link = document.createElement("a");
-          link.href = window.URL.createObjectURL(blob);
-          link.download = "lego_prices.xlsx";
-          link.click();
-        });
-    }
-  </script>
+    </script>
 </body>
 </html>
