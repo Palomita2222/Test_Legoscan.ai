@@ -1,71 +1,84 @@
-from flask import Flask, render_template, request, send_file
-import pandas as pd
-import io
+from flask import Flask, render_template, Response, jsonify
+import cv2
+import pytesseract
+import re
 import requests
 from requests_oauthlib import OAuth1
 
 app = Flask(__name__)
 
-# BrickLink credentials (replace with your real values)
+# BrickLink API credentials
 CONSUMER_KEY = 'your_consumer_key'
 CONSUMER_SECRET = 'your_consumer_secret'
-TOKEN = 'your_token'
+TOKEN = 'your_token_value'
 TOKEN_SECRET = 'your_token_secret'
 auth = OAuth1(CONSUMER_KEY, CONSUMER_SECRET, TOKEN, TOKEN_SECRET)
 
-scanned_sets = {}
-# scanned_sets = {
-#     "75192": {"name": "Millennium Falcon", "avg_price": 799.00}
-# }
+camera = cv2.VideoCapture(0)  # 0 = default webcam
 
-def get_price_and_name(lego_id):
-    name_url = f"https://api.bricklink.com/api/store/v1/items/SET/{lego_id}"
-    price_url = f"https://api.bricklink.com/api/store/v1/price-guide/SET/{lego_id}?new_or_used=N&guide_type=sold"
+def get_price_guide(item_id):
+    url = f"https://api.bricklink.com/api/store/v1/price-guide/SET/{item_id}?new_or_used=N&guide_type=sold"
+    response = requests.get(url, auth=auth)
+    if response.status_code == 200:
+        return response.json().get("data", {})
+    return "error"
 
-    name_resp = requests.get(name_url, auth=auth)
-    price_resp = requests.get(price_url, auth=auth)
+def gen_frames():
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
 
-    if name_resp.status_code == 200 and price_resp.status_code == 200:
-        name = name_resp.json()['data'].get('name', 'Unknown')
-        avg_price = price_resp.json()['data'].get('avg_price', None)
-        return name, avg_price
-    return None, None
+        # OCR
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        text = pytesseract.image_to_string(gray)
+        lego_ids = re.findall(r'\b\d{3,7}\b', text)  # LEGO IDs are usually 3-7 digits
+
+        # Overlay found ID
+        if lego_ids:
+            cv2.putText(frame, f"LEGO ID: {lego_ids[0]}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            print(lego_ids)
+
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/submit_code', methods=['POST'])
-def submit_code():
-    lego_id = request.json.get('lego_id')
-    if not lego_id or not lego_id.isdigit():
-        return {'error': 'Invalid ID'}, 400
+@app.route('/video_feed')
+def video_feed():
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-    if lego_id in scanned_sets:
-        return {'message': 'Already scanned'}, 200
+@app.route('/scan')
+def scan_and_fetch():
+    # Read one frame to scan
+    success, frame = camera.read()
+    if not success:
+        return jsonify({'error': 'Camera read failed'})
 
-    name, avg_price = get_price_and_name(lego_id)
-    if name:
-        scanned_sets[lego_id] = {'name': name, 'avg_price': avg_price}
-        return {'id': lego_id, 'name': name, 'avg_price': avg_price}, 200
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    text = pytesseract.image_to_string(gray)
+    print(text)
+    lego_ids = re.findall(r'\b\d{3,7}\b', text)
+
+    if not lego_ids:
+        return jsonify({'error': 'No LEGO ID found'})
+
+    lego_id = lego_ids[0]
+    price_data = get_price_guide(lego_id)
+
+    if price_data:
+        return jsonify({
+            'lego_id': lego_id,
+            'min_price': price_data.get('min_price'),
+            'avg_price': price_data.get('avg_price'),
+            'max_price': price_data.get('max_price'),
+            'qty_sold': price_data.get('qty_sold')
+        })
     else:
-        return {'error': 'LEGO set not found'}, 404
-
-@app.route('/export')
-def export_excel():
-    if not scanned_sets:
-        return "No data to export", 400
-
-    df = pd.DataFrame([
-        {'id': id, 'name': data['name'], 'avg_price': data['avg_price']}
-        for id, data in scanned_sets.items()
-    ])
-
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    output.seek(0)
-    return send_file(output, download_name='lego_scanned.xlsx', as_attachment=True)
+        return jsonify({'error': 'BrickLink data not found'})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    app.run(debug=True)
