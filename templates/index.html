@@ -1,23 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>LEGO Scanner</title>
+    <title>LEGO Code Scanner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
-    <h1>LEGO Set Scanner</h1>
-    <img src="{{ url_for('video_feed') }}" width="640" height="480">
+    <h2>Scan LEGO Box Code</h2>
+    <video id="video" width="100%" autoplay playsinline></video>
     <br>
-    <button onclick="scan()">Scan & Fetch Price</button>
-    <pre id="result"></pre>
+    <button onclick="capture()">Scan Code</button>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <p><strong>Detected Codes:</strong></p>
+    <ul id="results"></ul>
 
-    <script>
-        function scan() {
-            fetch('/scan')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('result').innerText = JSON.stringify(data, null, 2);
-                });
-        }
-    </script>
+    <script src="/static/script.js"></script>
 </body>
 </html>
